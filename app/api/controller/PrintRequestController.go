@@ -6,13 +6,14 @@ import (
 	"OnlineJudge/app/helper"
 	"OnlineJudge/config"
 	"OnlineJudge/constants"
-	"OnlineJudge/db_server"
+	"OnlineJudge/constants/redis_key"
+	"OnlineJudge/core/database"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/garyburd/redigo/redis"
 	"github.com/gin-gonic/gin"
-	"net/http"
-	"strconv"
-	"time"
 )
 
 func PrintRequest(c *gin.Context) {
@@ -27,8 +28,8 @@ func PrintRequest(c *gin.Context) {
 
 	now := time.Now().Unix()
 	interval := config.GetWutOjConfig()["print_interval_time"].(int)
-	redisStr := "user_last_print_request" + strconv.Itoa(int(userID))
-	if value, err := db_server.GetFromRedis(redisStr); err == nil {
+	redisStr := redis_key.LastPrintRequest(int(userID))
+	if value, err := database.GetFromRedis(redisStr); err == nil {
 		last, _ := redis.Int64(value, err)
 		fmt.Printf("now: %v, last: %v\n", now, last)
 
@@ -37,7 +38,7 @@ func PrintRequest(c *gin.Context) {
 			return
 		}
 	}
-	_ = db_server.PutToRedis(redisStr, now, 3600)
+	_ = database.PutToRedis(redisStr, now, 3600)
 
 	if err := c.ShouldBindJSON(&PrintLog); err != nil {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "绑定数据模型失败", err.Error()))

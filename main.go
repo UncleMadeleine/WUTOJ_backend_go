@@ -1,19 +1,20 @@
 package main
 
 import (
-	"OnlineJudge/judger"
-	"OnlineJudge/server"
+	"OnlineJudge/core/database"
+	"OnlineJudge/core/judger"
+	"OnlineJudge/core/server"
+
 	"github.com/gin-gonic/gin"
 )
-import "OnlineJudge/db_server"
 
 var httpServer *gin.Engine
 
-func main()  {
+func main() {
 	defer func() {
-		db_server.MySqlDb.Close()
+		database.MySqlDb.Close()
 		judger.CloseInstance()
 	}()
-	
+
 	server.Run(httpServer)
 }

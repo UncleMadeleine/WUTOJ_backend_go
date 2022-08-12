@@ -6,27 +6,28 @@ import (
 	"OnlineJudge/app/helper"
 	"OnlineJudge/config"
 	"OnlineJudge/constants"
-	"OnlineJudge/db_server"
-	"OnlineJudge/judger"
+	"OnlineJudge/constants/redis_key"
+	"OnlineJudge/core/database"
+	"OnlineJudge/core/judger"
 	"encoding/json"
 	"fmt"
-	"github.com/garyburd/redigo/redis"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-gonic/gin"
 	_ "io"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/garyburd/redigo/redis"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
 )
 
 func Submit(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
+	//TODO: auth participation and contest time
+	
+	problemModel := model.Problem{}
+	contestModel := model.Contest{}
+	contestUserModel := model.ContestUser{}
 
 	submitModel := model.Submit{}
 	submitValidate := validate.SubmitValidate
@@ -41,8 +42,8 @@ func Submit(c *gin.Context) {
 	format := "2006-01-02 15:04:05"
 	now, _ := time.Parse(format, time.Now().Format(format))
 	interval := config.GetWutOjConfig()["interval_time"].(int)
-	redisStr := "user_last_submit" + strconv.Itoa(int(userID.(uint)))
-	if value, err := db_server.GetFromRedis(redisStr); err == nil {
+	redisStr := redis_key.UserLastSubmit(int(userID.(uint)))
+	if value, err := database.GetFromRedis(redisStr); err == nil {
 		defaultFormat := "2006-01-02 15:04:05 +0000 UTC"
 		lastStr, _ := redis.String(value, err)
 		last, _ := time.Parse(defaultFormat, lastStr)
@@ -53,7 +54,7 @@ func Submit(c *gin.Context) {
 			return
 		}
 	}
-	_ = db_server.PutToRedis(redisStr, now, 3600)
+	_ = database.PutToRedis(redisStr, now, 3600)
 
 	var submitJson struct {
 		Language   string `json:"language"`
@@ -78,6 +79,38 @@ func Submit(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "不支持的语言类型", nil))
 		return
 	}
+
+	// judge if problem is private and in contests
+	ok := false
+	res := problemModel.GetProblemByID(int(submitJson.ProblemID))
+	if res.Status != constants.CodeSuccess || res.Data.(map[string]interface{})["problem"].(model.Problem).Public == constants.ProblemPublic {
+		ok = true
+	} else {
+		contestsBeginTime := contestModel.GetContestsByProblemID(
+			int(submitJson.ProblemID),
+			[]string{"contest.contest_id", "begin_time"},
+		)
+		if contestsBeginTime.Status == constants.CodeSuccess {
+			for _, contest := range contestsBeginTime.Data.([]model.Contest) {
+				if participation := contestUserModel.CheckUserContest(int(userID.(uint)), contest.ContestID); participation.Status == constants.CodeSuccess {
+					format := "2006-01-02 15:04:05"
+					now, _ := time.Parse(format, time.Now().Format(format))
+					beginTime, _, _, err := getContestTime(uint(contest.ContestID))
+					if err == nil && now.Unix() >= beginTime.Unix() {
+						ok = true
+						break
+					}
+				}
+			}
+		}
+	}
+	if !ok {
+		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "暂时无法提交", nil))
+		return
+	}
+	
+
+
 
 	newSubmit := model.Submit{
 		UserID:     userID.(uint),
@@ -137,7 +170,7 @@ func judge(submit model.Submit) {
 					return
 				}
 				user := user{UserID: submit.UserID, Nick: submit.Nick, Penalty: 0, ACNum: 0, ProblemID: make(map[uint]problem)}
-				if itemStr, err := redis.String(db_server.GetFromRedis("contest_rank" + strconv.Itoa(int(submit.ContestID)) + "user_id" + strconv.Itoa(int(submit.UserID)))); err == nil {
+				if itemStr, err := redis.String(database.GetFromRedis(redis_key.ContestRankUser(int(submit.ContestID), strconv.Itoa(int(submit.UserID))))); err == nil {
 					_ = json.Unmarshal([]byte(itemStr), &user)
 				}
 				if _, ok := user.ProblemID[submit.ProblemID]; !ok {
@@ -155,9 +188,9 @@ func judge(submit model.Submit) {
 					}
 
 					itemStr, _ := json.Marshal(user)
-					_ = db_server.PutToRedis("contest_rank"+strconv.Itoa(int(submit.ContestID))+"user_id"+strconv.Itoa(int(user.UserID)), itemStr, 3600)
+					_ = database.PutToRedis(redis_key.ContestRankUser(int(submit.ContestID), strconv.Itoa(int(user.UserID))), itemStr, 3600)
 					score := -int64(user.ACNum)*1000000000 + user.Penalty
-					_ = db_server.ZAddToRedis("contest_rank"+strconv.Itoa(int(submit.ContestID)), score, user.UserID)
+					_ = database.ZAddToRedis(redis_key.ContestRank(int(submit.ContestID)), score, user.UserID)
 
 				}
 			}
@@ -170,13 +203,6 @@ func judge(submit model.Submit) {
 }
 
 func GetSubmitInfo(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	submitModel := model.Submit{}
 
 	submitJson := struct {
@@ -198,19 +224,7 @@ func GetSubmitInfo(c *gin.Context) {
 
 }
 
-// TODO
-func GetAllSubmitInfo(c *gin.Context) {
-	// change to GetSubmitInfo
-}
-
-// TODO
 func GetProblemSubmitInfo(c *gin.Context) {
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	submitModel := model.Submit{}
 	submitJson := model.Submit{}
 
@@ -220,19 +234,12 @@ func GetProblemSubmitInfo(c *gin.Context) {
 	}
 
 	submitJson.UserID = GetUserIdFromSession(c)
-	res = submitModel.GetProblemSubmit(submitJson)
+	res := submitModel.GetProblemSubmit(submitJson)
 	c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
 	return
 }
 
-// TODO
 func GetUserContestSubmitInfo(c *gin.Context) {
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	submitValidate := validate.SubmitValidate
 	submitModel := model.Submit{}
 
@@ -255,7 +262,7 @@ func GetUserContestSubmitInfo(c *gin.Context) {
 		return
 	}
 
-	res = submitModel.GetContestSubmit(submitJson.UserID, submitJson.ContestID, submitJson.PageNumber)
+	res := submitModel.GetContestSubmitByUser(submitJson.UserID, submitJson.ContestID, submitJson.PageNumber)
 	c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
 	return
 }

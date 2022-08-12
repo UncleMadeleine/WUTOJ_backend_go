@@ -5,12 +5,13 @@ import (
 	"OnlineJudge/app/helper"
 	"OnlineJudge/app/panel/model"
 	"OnlineJudge/constants"
-	"OnlineJudge/db_server"
+	"OnlineJudge/constants/redis_key"
+	"OnlineJudge/core/database"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
 	"net/http"
-	"strconv"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GetAllContest(c *gin.Context) {
@@ -38,6 +39,7 @@ func GetAllContest(c *gin.Context) {
 func GetContestByID(c *gin.Context) {
 	contestValidate := validate.ContestValidate
 	contestModel := model.Contest{}
+	contestProblemModel := model.ContestProblem{}
 
 	var contestJson model.Contest
 
@@ -53,7 +55,15 @@ func GetContestByID(c *gin.Context) {
 	}
 
 	res := contestModel.FindContestByID(contestJson.ContestID)
-	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+	if res.Status != constants.CodeSuccess {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+		return
+	}
+	contestRes := res.Data.(model.Contest)
+	problemsRes := contestProblemModel.GetContestProblems(contestJson.ContestID)
+	problemStr, _ := json.Marshal(problemsRes.Data)
+	contestRes.Problems = string(problemStr)
+	c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeSuccess, "get success", contestRes))
 	return
 }
 
@@ -61,7 +71,7 @@ func AddContest(c *gin.Context) {
 	contestValidate := validate.ContestValidate
 	contestModel := model.Contest{}
 	problemModel := model.Problem{}
-
+	contestProblemModel := model.ContestProblem{}
 	var contestJson model.Contest
 	if err := c.ShouldBind(&contestJson); err != nil {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "绑定数据模型失败", err.Error()))
@@ -84,6 +94,14 @@ func AddContest(c *gin.Context) {
 	}
 
 	res := contestModel.AddContest(contestJson)
+	if res.Status != constants.CodeSuccess {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+		return
+	}
+	contestID := res.Data.(int)
+	for _, id := range problems {
+		_ = contestProblemModel.AddContestProblem(model.ContestProblem{ContestID: contestID, ProblemID: id})
+	}
 	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
 	return
 }
@@ -91,7 +109,7 @@ func AddContest(c *gin.Context) {
 func DeleteContest(c *gin.Context) {
 	contestValidate := validate.ContestValidate
 	contestModel := model.Contest{}
-
+	contestProblemModel := model.ContestProblem{}
 	var contestJson model.Contest
 	if err := c.ShouldBind(&contestJson); err != nil {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "绑定数据模型失败", err.Error()))
@@ -104,6 +122,7 @@ func DeleteContest(c *gin.Context) {
 		return
 	}
 
+	_ = contestProblemModel.DeleteContestProblem(contestJson.ContestID)
 	res := contestModel.DeleteContest(contestJson.ContestID)
 	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
 	return
@@ -113,7 +132,7 @@ func UpdateContest(c *gin.Context) {
 	contestValidate := validate.ContestValidate
 	contestModel := model.Contest{}
 	problemModel := model.Problem{}
-
+	contestProblemModel := model.ContestProblem{}
 	var contestJson model.Contest
 	if err := c.ShouldBind(&contestJson); err != nil {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "绑定数据模型失败", err.Error()))
@@ -136,6 +155,14 @@ func UpdateContest(c *gin.Context) {
 	}
 
 	res := contestModel.UpdateContest(contestJson.ContestID, contestJson)
+	if res.Status != constants.CodeSuccess {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+		return
+	}
+	_ = contestProblemModel.DeleteContestProblem(contestJson.ContestID)
+	for _, id := range problems {
+		_ = contestProblemModel.AddContestProblem(model.ContestProblem{ContestID: contestJson.ContestID, ProblemID: id})
+	}
 	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
 	return
 }
@@ -176,12 +203,32 @@ func ClearContestRedis(c *gin.Context) {
 		return
 	}
 
-
-	if err := db_server.DeleteFromRedis("contest_rank" + strconv.Itoa(int(contestJson.ContestID))); err != nil {
+	if err := database.DeleteFromRedis(redis_key.ContestRank(int(contestJson.ContestID))); err != nil {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "刷新排行榜失败", err.Error()))
 		return
 	}
 
 	c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeSuccess, "刷新排行榜成功", 0))
 	return
+}
+
+func SetOuterBoard(c *gin.Context) {
+	contestJson := struct {
+		ContestID 	int		`json:"contest_id" form:"contest_id"`
+		Time 		int 	`json:"time" form:"time"`
+	}{}
+
+	if err := c.ShouldBind(&contestJson); err != nil {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "绑定数据模型失败", err.Error()))
+		return
+	}
+	_ = database.DeleteFromRedis(redis_key.OuterInfo)
+	_ = database.DeleteFromRedis(redis_key.OuterSubmits)
+	_ = database.DeleteFromRedis(redis_key.OuterTeams)
+	_ = database.DeleteFromRedis(redis_key.OuterID)
+	if err := database.PutToRedis(redis_key.OuterID, contestJson.ContestID, contestJson.Time); err != nil {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "redis error", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeSuccess, "开放成功", nil))
 }

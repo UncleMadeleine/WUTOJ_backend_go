@@ -6,18 +6,19 @@ import (
 	"OnlineJudge/app/panel/model"
 	"OnlineJudge/config"
 	"OnlineJudge/constants"
+	"encoding/xml"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/gin-gonic/gin"
+	"io/ioutil"
 	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
+	"regexp"
 	"strconv"
 	"strings"
-	"encoding/xml"
-	"io/ioutil"
-	"regexp"
 )
 
 func GetAllProblem(c *gin.Context) {
@@ -100,8 +101,15 @@ func DeleteProblem(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, err.Error(), 0))
 		return
 	}
-
 	res := problemModel.DeleteProblem(problemJson.ProblemID)
+	if res.Status != constants.CodeSuccess {
+		c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+		return
+	}
+	if err := deleteProblemData(problemJson.ProblemID) ; err != nil{
+		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, err.Error(), 0))
+		return
+	}
 	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
 	return
 }
@@ -211,6 +219,40 @@ func SetProblemTimeAndSpace(c *gin.Context) {
 	res := problemModel.UpdateProblem(problemJson.ProblemID, problemData)
 
 	c.JSON(http.StatusOK, helper.BackendApiReturn(res.Status, res.Msg, res.Data))
+	return
+}
+
+func UploadImg(c *gin.Context) {
+	file, err := c.FormFile("file")
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": constants.CodeError,
+			"msg": "upload img error",
+			"url":"",
+		})
+		return
+	}
+
+	FileNameMd5 := helper.GetMd5(file.Filename)
+
+	dst := "/uploads/image/" + FileNameMd5 + helper.RandString(11) + path.Ext(file.Filename)
+
+	if err := c.SaveUploadedFile(file, "web"+dst); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": constants.CodeError,
+			"msg": "upload img error "+err.Error(),
+			"url":"",
+		})
+		return
+	}
+	serverConfig := config.GetServerConfig()
+	finalUrl := fmt.Sprintf("http://%s:%s%s", serverConfig["domain"], serverConfig["port"], dst)
+	c.JSON(http.StatusOK, gin.H{
+		"code": constants.CodeSuccess,
+		"msg": "upload img success",
+		"url": finalUrl,
+	})
 	return
 }
 
@@ -532,3 +574,29 @@ func parseProblemXml(file *multipart.File) ([]ProblemItem, error) {
 	return v.Item, nil
 }
 
+func deleteProblemData(ProblemID int) error {
+	judgeConfig := config.GetJudgeConfig()
+	dataPath := judgeConfig["base_dir"].(string) + "/" + judgeConfig["env"].(string) + "/" + strconv.Itoa(ProblemID) 
+	if isExist(dataPath) == false {
+		return fmt.Errorf("DeleteProblemData error: No data exists")
+	}
+	if err := os.RemoveAll(dataPath); err != nil{
+		return fmt.Errorf("DeleteProblemData error:"+err.Error())
+	}
+	return nil
+}
+
+
+func isExist(path string)(bool){
+    _, err := os.Stat(path)
+    if err != nil{
+        if os.IsExist(err){
+            return true
+        }
+        if os.IsNotExist(err){
+            return false
+        }
+        return false
+    }
+    return true
+}

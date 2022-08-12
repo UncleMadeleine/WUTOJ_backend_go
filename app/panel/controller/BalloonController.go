@@ -4,20 +4,23 @@ import (
 	"OnlineJudge/app/helper"
 	"OnlineJudge/app/panel/model"
 	"OnlineJudge/constants"
-	"OnlineJudge/db_server"
+	"OnlineJudge/constants/redis_key"
+	"OnlineJudge/core/database"
 	"encoding/json"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
 
-func GetContestBalloon(c *gin.Context)  {
+//GetContestBalloon 获取气球
+func GetContestBalloon(c *gin.Context) {
 	contestModel := model.Contest{}
 	SubmitModel := model.Submit{}
 
 	contestIDJson := struct {
-		ContestID 	uint 	`json:"contest_id" form:"contest_id"`
+		ContestID uint `json:"contest_id" form:"contest_id"`
 	}{}
 
 	if err := c.ShouldBind(&contestIDJson); err != nil {
@@ -37,8 +40,6 @@ func GetContestBalloon(c *gin.Context)  {
 		return
 	}
 
-
-
 	contest := contestRes.Data.(model.Contest)
 	submits := submitRes.Data.([]model.SubmitBalloon)
 
@@ -54,33 +55,33 @@ func GetContestBalloon(c *gin.Context)  {
 	}
 
 	type balloon struct {
-		ID 		uint 	`json:"id"`
-		UserID 	uint 	`json:"user_id"`
-		Nick 	string 	`json:"nick"`
-		Realname string `json:"realname" form:"realname"`
-		ProblemID 	int 	`json:"problem_id"`
-		Color 	string 	`json:"color"`
-		IsSent	bool 	`json:"is_sent"`
+		ID        uint   `json:"id"`
+		UserID    uint   `json:"user_id"`
+		Nick      string `json:"nick"`
+		Realname  string `json:"realname" form:"realname"`
+		ProblemID int    `json:"problem_id"`
+		Color     string `json:"color"`
+		IsSent    bool   `json:"is_sent"`
 	}
-	
+
 	var balloons []balloon
 	balloonMap := make(map[string]bool)
 
 	for _, submit := range submits {
-		newBalloon := balloon {
-			UserID: submit.UserID,
-			ID: submit.ID,
-			Nick: submit.Nick,
-			ProblemID: problemIDMap[submit.ProblemID]+1,
-			Color: colors[problemIDMap[submit.ProblemID]],
-			Realname: submit.Realname,
+		newBalloon := balloon{
+			UserID:    submit.UserID,
+			ID:        submit.ID,
+			Nick:      submit.Nick,
+			ProblemID: problemIDMap[submit.ProblemID] + 1,
+			Color:     colors[problemIDMap[submit.ProblemID]],
+			Realname:  submit.Realname,
 		}
-		submitIdentity := strconv.Itoa(int(contestIDJson.ContestID)) + strconv.Itoa(newBalloon.ProblemID)+" "+strconv.Itoa(int(newBalloon.UserID))
+		submitIdentity := strconv.Itoa(int(contestIDJson.ContestID)) + strconv.Itoa(newBalloon.ProblemID) + " " + strconv.Itoa(int(newBalloon.UserID))
 		if _, ok := balloonMap[submitIdentity]; ok {
 			continue
 		}
 		balloonMap[submitIdentity] = true
-		value, err := db_server.SIsNumberOfRedisSet("balloon"+strconv.Itoa(int(contestIDJson.ContestID)), submitIdentity)
+		value, err := database.SIsNumberOfRedisSet(redis_key.Balloon(int(contestIDJson.ContestID)), submitIdentity)
 		if err != nil {
 			c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "Redis错误", err.Error()))
 			return
@@ -92,11 +93,11 @@ func GetContestBalloon(c *gin.Context)  {
 	c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeSuccess, "获取成功", balloons))
 }
 
-func SentBalloon(c *gin.Context)  {
+func SentBalloon(c *gin.Context) {
 	IDJson := struct {
-		ContestID 	uint 	`json:"contest_id" form:"contest_id"`
-		ProblemID 	int 	`json:"problem_id" form:"problem_id"`
-		UserID 		uint 	`json:"user_id" form:"user_id"`
+		ContestID uint `json:"contest_id" form:"contest_id"`
+		ProblemID int  `json:"problem_id" form:"problem_id"`
+		UserID    uint `json:"user_id" form:"user_id"`
 	}{}
 
 	if err := c.ShouldBind(&IDJson); err != nil {
@@ -104,9 +105,9 @@ func SentBalloon(c *gin.Context)  {
 		return
 	}
 
-	submitIdentity := strconv.Itoa(int(IDJson.ContestID)) + strconv.Itoa(IDJson.ProblemID)+" "+strconv.Itoa(int(IDJson.UserID))
+	submitIdentity := strconv.Itoa(int(IDJson.ContestID)) + strconv.Itoa(IDJson.ProblemID) + " " + strconv.Itoa(int(IDJson.UserID))
 
-	if err := db_server.SAddToRedisSet("balloon"+strconv.Itoa(int(IDJson.ContestID)), submitIdentity); err != nil {
+	if err := database.SAddToRedisSet(redis_key.Balloon(int(IDJson.ContestID)), submitIdentity); err != nil {
 		c.JSON(http.StatusOK, helper.BackendApiReturn(constants.CodeError, "设置失败", err.Error()))
 		return
 	}

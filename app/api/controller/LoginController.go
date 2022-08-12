@@ -5,7 +5,8 @@ import (
 	"OnlineJudge/app/common/validate"
 	"OnlineJudge/app/helper"
 	"OnlineJudge/constants"
-	"OnlineJudge/db_server"
+	"OnlineJudge/constants/redis_key"
+	"OnlineJudge/core/database"
 	"encoding/json"
 	"github.com/garyburd/redigo/redis"
 	"github.com/gin-contrib/sessions"
@@ -123,10 +124,10 @@ func UpdatePassword(c *gin.Context) {
 		return
 	}
 
-	KeyValue := "VerifyCode" + userJson.Mail
+	KeyValue := redis_key.VerifyCode(userJson.Mail)
 
-	VerifyCodeCorrect, err := redis.String(db_server.GetFromRedis(KeyValue))
-	db_server.DeleteFromRedis(KeyValue)
+	VerifyCodeCorrect, err := redis.String(database.GetFromRedis(KeyValue))
+	database.DeleteFromRedis(KeyValue)
 	if err != nil {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "验证码已过期，请重新发送验证码", err.Error()))
 		return

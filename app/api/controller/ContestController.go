@@ -7,11 +7,12 @@ import (
 	"OnlineJudge/constants"
 	"encoding/json"
 	"fmt"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
 )
 
 func GetAllContest(c *gin.Context) {
@@ -32,16 +33,10 @@ func GetAllContest(c *gin.Context) {
 }
 
 func GetContestByID(c *gin.Context) {
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-	userIDRaw := res.Data.(uint)
-	userID := int(userIDRaw)
+	userID := int(GetUserIdFromSession(c))
 
 	ContestIDRaw := c.Param("contest_id")
-	ContestID , err := strconv.Atoi(ContestIDRaw)
+	ContestID, err := strconv.Atoi(ContestIDRaw)
 	if err != nil {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "比赛ID错误", 0))
 		return
@@ -49,10 +44,10 @@ func GetContestByID(c *gin.Context) {
 	fmt.Println(ContestID)
 	contestModel := model.Contest{}
 
-	res = contestModel.GetContestById(ContestID)
+	res := contestModel.GetContestById(ContestID)
 	if res.Status != constants.CodeError {
 		contestUserModel := model.ContestUser{}
-		if participation := contestUserModel.CheckUserContest(userID,ContestID); participation.Status != constants.CodeSuccess{
+		if participation := contestUserModel.CheckUserContest(userID, ContestID); participation.Status != constants.CodeSuccess {
 			c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "尚未参赛，请参赛", 0))
 			return
 		}
@@ -63,15 +58,7 @@ func GetContestByID(c *gin.Context) {
 	}
 
 }
-
 func JoinContest(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	var contestUserModel = model.ContestUser{}
 	var contestUserJson model.ContestUser
 
@@ -85,19 +72,12 @@ func JoinContest(c *gin.Context) {
 		return
 	}
 
-	res = contestUserModel.AddContestUser(contestUserJson)
+	res := contestUserModel.AddContestUser(contestUserJson)
 	c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
 
 }
 
 func GetContestStatus(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	var contestModel = model.Contest{}
 	var ContestID struct {
 		ID int `form:"contest_id"`
@@ -106,18 +86,11 @@ func GetContestStatus(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "数据模型绑定错误", err.Error()))
 		return
 	}
-	res = contestModel.GetContestStatus(ContestID.ID)
+	res := contestModel.GetContestStatus(ContestID.ID)
 	c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
 }
 
 func GetUserContest(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	UserID := GetUserIdFromSession(c)
 	log.Print(UserID)
 	contestUserModel := model.ContestUser{}
@@ -125,19 +98,12 @@ func GetUserContest(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "请先登陆", ""))
 		return
 	}
-	res = contestUserModel.GetUserContest(int(UserID))
+	res := contestUserModel.GetUserContest(int(UserID))
 	c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
 }
 
 func GetContestProblems(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-	userIDRaw := res.Data.(uint)
-	userID := int(userIDRaw)
+	userID := int(GetUserIdFromSession(c))
 
 	var ContestJson model.Contest
 	contestModel := model.Contest{}
@@ -146,10 +112,10 @@ func GetContestProblems(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "数据模型绑定错误", ""))
 		return
 	}
-	
+
 	contestID := ContestJson.ContestID
 	contestUserModel := model.ContestUser{}
-	if participation := contestUserModel.CheckUserContest(userID,contestID); participation.Status != constants.CodeSuccess{
+	if participation := contestUserModel.CheckUserContest(userID, contestID); participation.Status != constants.CodeSuccess {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "尚未参赛，请参赛", 0))
 		return
 	}
@@ -161,7 +127,7 @@ func GetContestProblems(c *gin.Context) {
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, err.Error(), 0))
 		return
 	}
-	res = contestModel.GetContestProblems(ContestJson.ContestID)
+	res := contestModel.GetContestProblems(ContestJson.ContestID)
 
 	if res.Status != constants.CodeSuccess {
 		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
@@ -169,8 +135,8 @@ func GetContestProblems(c *gin.Context) {
 	}
 	// 获取题目id
 	type problemInfo struct {
-		ID	uint 	`json:"id"`
-		Info  map[string]interface{} `json:"info""`
+		ID   uint                   `json:"id"`
+		Info map[string]interface{} `json:"info""`
 	}
 
 	problemIDsStr := res.Data.(string)
@@ -190,7 +156,7 @@ func GetContestProblems(c *gin.Context) {
 		// 查询题目数据失败
 		for _, problemID := range problemIDs {
 			item := problemInfo{ID: problemID, Info: make(map[string]interface{})}
-			result =  append(result, item)
+			result = append(result, item)
 		}
 		c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeError, "获取题目信息失败", result))
 		return
@@ -199,12 +165,12 @@ func GetContestProblems(c *gin.Context) {
 	problemInfos := res.Data.([]model.Problem)
 	for _, info := range problemInfos {
 		// gen problem info
-		extraMap := map[string]interface{} {
+		extraMap := map[string]interface{}{
 			"title": info.Title,
 		}
 
 		item := problemInfo{ID: info.ProblemID, Info: extraMap}
-		result =  append(result, item)
+		result = append(result, item)
 	}
 	c.JSON(http.StatusOK, helper.ApiReturn(constants.CodeSuccess, "获取比赛题目信息成功", result))
 
@@ -212,13 +178,6 @@ func GetContestProblems(c *gin.Context) {
 }
 
 func SearchContest(c *gin.Context) {
-
-	res := checkLogin(c)
-	if res.Status == constants.CodeError {
-		c.JSON(http.StatusOK, helper.ApiReturn(res.Status, res.Msg, res.Data))
-		return
-	}
-
 	contestJson := struct {
 		Param string `uri:"param" json:"param"`
 	}{}
@@ -236,6 +195,7 @@ func SearchContest(c *gin.Context) {
 	}
 }
 
+// MARK: 检测用户是否参赛
 func CheckContest(c *gin.Context) {
 	session := sessions.Default(c)
 	UserID := int(session.Get("user_id").(uint))
